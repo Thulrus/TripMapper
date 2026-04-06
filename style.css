@@ -1,0 +1,128 @@
+/* ─── Reset & base ─────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-surface:   #1a1a2e;
+  --bg-elevated:  #252545;
+  --bg-input:     #12121f;
+  --border:       #35355a;
+  --text-primary: #e8e8f0;
+  --text-muted:   #8888aa;
+  --accent:       #5b8dee;
+  --danger:       #e05b5b;
+  --radius:       8px;
+  --shadow:       0 4px 20px rgba(0, 0, 0, 0.55);
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+}
+
+/* ─── Map ───────────────────────────────────────────────────── */
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Push Leaflet zoom control to top-right (done in JS) */
+.leaflet-top.leaflet-right .leaflet-control-zoom {
+  border: none;
+  box-shadow: var(--shadow);
+}
+
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.leaflet-control-zoom-in:hover,
+.leaflet-control-zoom-out:hover {
+  background: var(--bg-surface) !important;
+}
+
+/* ─── Search container ──────────────────────────────────────── */
+#search-container {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1000;
+  width: 290px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#search-box {
+  display: flex;
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+#search-box:focus-within {
+  border-color: var(--accent);
+}
+
+#search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+#search-input::placeholder {
+  color: var(--text-muted);
+}
+
+#search-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 0 12px;
+  height: 40px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+  flex-shrink: 0;
+}
+
+#search-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+/* ─── Search error ──────────────────────────────────────────── */
+#search-error {
+  background: var(--bg-elevated);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  font-size: 13px;
+  box-shadow: var(--shadow);
+}
+
+.hidden {
+  display: none;
+}

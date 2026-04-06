@@ -1,0 +1,23 @@
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+*.suo
+*.user
+.idea/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.local
+
+# Dependency directories (if npm/node is ever added)
+node_modules/
+
+# Build output (if a build step is ever added)
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
