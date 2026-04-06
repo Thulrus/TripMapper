@@ -76,8 +76,24 @@
           <span id="speed-label">Med</span>
         </div>
       </div>
+      <div id="style-controls">
+        <div class="style-row">
+          <label for="anim-color" class="stat-label">Color</label>
+          <input type="color" id="anim-color" value="#ff6b35" aria-label="Animation line color" />
+        </div>
+        <div class="style-row">
+          <label for="anim-weight" class="stat-label">Width</label>
+          <input type="range" id="anim-weight" min="2" max="12" step="1" value="5"
+                 aria-label="Animation line thickness" />
+          <span id="anim-weight-label" class="stat-value">5</span>
+        </div>
+      </div>
     </div>
   </aside>
+
+  <button id="sidebar-toggle" aria-label="Open sidebar">
+    <span class="toggle-icon" aria-hidden="true">&#9776;</span>
+  </button>
 
   <div id="progress-track" class="hidden"
        role="progressbar" aria-label="Animation progress"

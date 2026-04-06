@@ -15,15 +15,31 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   subdomains: 'abcd',
   maxZoom: 20,
 }).addTo(map);
+// ─── Customisation state ─────────────────────────────────────────────────────
 
+let animColor  = localStorage.getItem('anim_color')  || '#ff6b35';
+let animWeight = Number(localStorage.getItem('anim_weight')) || 5;
+
+// Dedicated pane so we can apply a CSS glow filter to the whole animation layer.
+map.createPane('animPane');
+map.getPane('animPane').style.zIndex = 450;
+// Separate SVG renderer inside that pane (needed for vector layers in custom panes)
+const animRenderer = L.svg({ pane: 'animPane' });
+
+function updateGlowFilter() {
+  map.getPane('animPane').style.filter =
+    `drop-shadow(0 0 6px ${animColor}bb) drop-shadow(0 0 3px ${animColor}77)`;
+}
+updateGlowFilter();
 // ─── Waypoint state ──────────────────────────────────────────────────────────
 
 const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
-// Each entry: { id, latlng, marker, placeName }
+// Each entry: { id, latlng, marker, placeName, label }
 const waypoints = [];
 let nextId = 0;
 let routeLayer = null;
+let promptLabelId = null; // id of the most recently placed waypoint (auto-prompts label edit)
 
 // Animation state
 let routePoints   = [];   // [lat, lng] pairs from Mapbox geometry
@@ -56,7 +72,8 @@ function addWaypoint(latlng) {
   const index = waypoints.length;
   const id = nextId++;
   const marker = L.marker(latlng, { icon: makeIcon(index) }).addTo(map);
-  waypoints.push({ id, latlng, marker, placeName: null });
+  waypoints.push({ id, latlng, marker, placeName: null, label: '' });
+  promptLabelId = id;
   clearRoute();
   refreshSidebar();
 
@@ -65,9 +82,13 @@ function addWaypoint(latlng) {
     const wp = waypoints.find((w) => w.id === id);
     if (!wp || !name) return;
     wp.placeName = name;
-    // Update the already-rendered list item if it is still in the DOM
-    const el = waypointList.querySelector(`[data-wp-id="${id}"]`);
-    if (el) el.textContent = name;
+    updateMarkerTooltip(wp);
+    // Update the sidebar span only if the user hasn't set a custom label
+    // and the element is a span (not currently being edited as an input)
+    if (!wp.label) {
+      const el = waypointList.querySelector(`span[data-wp-id="${id}"]`);
+      if (el) el.textContent = name;
+    }
   });
 }
 
@@ -143,9 +164,16 @@ function refreshSidebar() {
     const name = document.createElement('span');
     name.className = 'wp-name';
     name.dataset.wpId = wp.id;
-    // Show cached name immediately; coordinates as fallback while fetch is in-flight
-    name.textContent = wp.placeName
-      ?? `${wp.latlng.lat.toFixed(4)}, ${wp.latlng.lng.toFixed(4)}`;
+    name.title = 'Click to rename';
+    name.textContent = wp.label
+      || wp.placeName
+      || `${wp.latlng.lat.toFixed(4)}, ${wp.latlng.lng.toFixed(4)}`;
+    name.addEventListener('click', () => startLabelEdit(wp, name));
+    // Auto-prompt label on the most recently placed waypoint
+    if (wp.id === promptLabelId) {
+      promptLabelId = null;
+      requestAnimationFrame(() => startLabelEdit(wp, name));
+    }
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'wp-remove';
@@ -161,6 +189,50 @@ function refreshSidebar() {
 
     item.append(badge, name, removeBtn);
     waypointList.appendChild(item);
+  });
+}
+
+function updateMarkerTooltip(wp) {
+  const text = wp.label || wp.placeName;
+  if (text) {
+    wp.marker.bindTooltip(text, {
+      direction: 'top',
+      offset: [0, -18],
+      className: 'wp-tooltip',
+    });
+  } else {
+    wp.marker.unbindTooltip();
+  }
+}
+
+function startLabelEdit(wp, spanEl) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'wp-label-input';
+  input.value = wp.label || '';
+  input.placeholder = 'Label (optional)…';
+  input.setAttribute('aria-label', 'Waypoint label');
+  spanEl.replaceWith(input);
+  input.focus();
+
+  const finish = () => {
+    wp.label = input.value.trim();
+    updateMarkerTooltip(wp);
+    const span = document.createElement('span');
+    span.className = 'wp-name';
+    span.dataset.wpId = wp.id;
+    span.title = 'Click to rename';
+    span.textContent = wp.label
+      || wp.placeName
+      || `${wp.latlng.lat.toFixed(4)}, ${wp.latlng.lng.toFixed(4)}`;
+    span.addEventListener('click', () => startLabelEdit(wp, span));
+    input.replaceWith(span);
+  };
+
+  input.addEventListener('blur', finish);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = wp.label || ''; input.blur(); }
   });
 }
 
@@ -270,22 +342,26 @@ function applyProgress(t) {
 
   if (!animLine) {
     animLine = L.polyline([], {
-      color: '#ff6b35',
-      weight: 5,
+      color: animColor,
+      weight: animWeight,
       opacity: 0.95,
       lineJoin: 'round',
       lineCap: 'round',
+      pane: 'animPane',
+      renderer: animRenderer,
     }).addTo(map);
   }
   animLine.setLatLngs(partial);
 
   if (!travelerDot) {
     travelerDot = L.circleMarker([0, 0], {
-      radius: 8,
-      fillColor: '#ff6b35',
+      radius: Math.max(6, animWeight + 2),
+      fillColor: animColor,
       fillOpacity: 1,
       color: '#fff',
       weight: 2.5,
+      pane: 'animPane',
+      renderer: animRenderer,
     }).addTo(map);
   }
   travelerDot.setLatLng(head);
@@ -344,7 +420,65 @@ speedSlider.addEventListener('input', () => {
   speedLabel.textContent = SPEED_LABELS[Number(speedSlider.value)];
 });
 
-// ─── GraphHopper Directions routing ─────────────────────────────────────────────────
+// ─── Animation style controls ────────────────────────────────────────────────────
+
+function setAnimStyle() {
+  if (animLine) {
+    animLine.setStyle({ color: animColor, weight: animWeight });
+  }
+  if (travelerDot) {
+    travelerDot.setStyle({
+      fillColor: animColor,
+      radius: Math.max(6, animWeight + 2),
+    });
+  }
+  updateGlowFilter();
+}
+
+const colorPicker  = document.getElementById('anim-color');
+const weightSlider = document.getElementById('anim-weight');
+const weightLabel  = document.getElementById('anim-weight-label');
+
+colorPicker.value  = animColor;
+weightSlider.value = animWeight;
+weightLabel.textContent = animWeight;
+
+colorPicker.addEventListener('input', () => {
+  animColor = colorPicker.value;
+  localStorage.setItem('anim_color', animColor);
+  setAnimStyle();
+});
+
+weightSlider.addEventListener('input', () => {
+  animWeight = Number(weightSlider.value);
+  weightLabel.textContent = animWeight;
+  localStorage.setItem('anim_weight', animWeight);
+  setAnimStyle();
+});
+
+// ─── Progress bar scrubbing ────────────────────────────────────────────────────
+
+function scrubTo(clientX) {
+  const rect = progressTrack.getBoundingClientRect();
+  const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  animT = t;
+  if (animPlaying) pauseAnim();
+  if (routePoints.length) applyProgress(t);
+}
+
+progressTrack.addEventListener('pointerdown', (e) => {
+  if (!routePoints.length) return;
+  e.preventDefault();
+  progressTrack.setPointerCapture(e.pointerId);
+  scrubTo(e.clientX);
+});
+
+progressTrack.addEventListener('pointermove', (e) => {
+  if (e.buttons === 0 || !routePoints.length) return;
+  scrubTo(e.clientX);
+});
+
+// ─── GraphHopper Directions routing ────────────────────────────────────────────────────
 
 // Throws on any failure so the retry loop in updateRoute can catch it.
 async function fetchRouteData(coords) {
@@ -520,4 +654,15 @@ searchBtn.addEventListener('click', () => geocodeAndFly(searchInput.value));
 
 searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') geocodeAndFly(searchInput.value);
+});
+
+// ─── Mobile sidebar toggle ────────────────────────────────────────────────────
+
+const sidebar       = document.getElementById('sidebar');
+const sidebarToggle = document.getElementById('sidebar-toggle');
+
+sidebarToggle.addEventListener('click', () => {
+  const isOpen = sidebar.classList.toggle('sidebar-open');
+  sidebarToggle.setAttribute('aria-label', isOpen ? 'Close sidebar' : 'Open sidebar');
+  sidebarToggle.querySelector('.toggle-icon').textContent = isOpen ? '\u2715' : '\u2630';
 });

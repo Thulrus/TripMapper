@@ -267,7 +267,7 @@ html, body {
 /* ─── Route loading / error ───────────────────────────────────────── */
 #route-loading:not(.hidden) {
   display: flex;
-}
+
   align-items: center;
   gap: 10px;
   margin: 8px;
@@ -509,9 +509,16 @@ html, body {
   bottom: 0;
   left: 0;
   right: 300px; /* leave room for sidebar */
-  height: 5px;
-  background: rgba(255, 255, 255, 0.08);
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
   z-index: 1001;
+  cursor: pointer;
+  user-select: none;
+  transition: height 0.15s;
+}
+
+#progress-track:hover {
+  height: 11px;
 }
 
 #progress-fill {
@@ -519,9 +526,166 @@ html, body {
   width: 0%;
   background: #ff6b35;
   border-radius: 0 2px 2px 0;
+  transition: width 0.05s linear;
 }
 
-/* ─── API key modal ────────────────────────────────────── */
+/* ─── Style controls (color + width) ────────────────────────── */
+#style-controls {
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.style-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.style-row .stat-label {
+  min-width: 44px;
+}
+
+#anim-color {
+  width: 30px;
+  height: 22px;
+  padding: 1px 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#anim-weight {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#anim-weight::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+#anim-weight::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  border: none;
+}
+
+/* ─── Waypoint label inline input ─────────────────────── */
+.wp-label-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 2px 6px;
+  outline: none;
+  min-width: 0;
+}
+
+/* ─── Leaflet tooltip (waypoint labels) ─────────────── */
+.leaflet-tooltip.wp-tooltip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  padding: 4px 8px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+
+.leaflet-tooltip.wp-tooltip::before {
+  border-top-color: var(--border);
+}
+
+
+/* ─── Sidebar toggle (mobile only) ────────────────── */
+#sidebar-toggle {
+  display: none;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1001;
+  width: 40px;
+  height: 40px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 18px;
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+#sidebar-toggle:hover {
+  background: var(--bg-surface);
+}
+
+/* ─── Mobile responsive (≤ 699 px) ───────────────── */
+@media (max-width: 699px) {
+  /* Sidebar slides in from right as an overlay */
+  #sidebar {
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    width: min(300px, 100vw);
+    bottom: 0;
+    box-shadow: -6px 0 30px rgba(0, 0, 0, 0.6);
+  }
+
+  #sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* Show the toggle button */
+  #sidebar-toggle {
+    display: flex;
+  }
+
+  /* Search bar: leave room for toggle button */
+  #search-container {
+    width: calc(100vw - 72px);
+  }
+
+  /* Progress bar full-width (sidebar is overlaid, not beside it) */
+  #progress-track {
+    right: 0;
+  }
+
+  /* Zoom control bottom-left — already fine, ensure it doesn't grow too wide */
+  .leaflet-bottom.leaflet-left .leaflet-control-zoom {
+    margin-bottom: 10px;
+    margin-left: 10px;
+  }
+} ────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
   inset: 0;
