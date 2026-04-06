@@ -14,9 +14,28 @@
   <aside id="sidebar" aria-label="Waypoints">
     <div id="sidebar-header">
       <h2>Waypoints</h2>
-      <button id="clear-all-btn" aria-label="Remove all waypoints">Clear all</button>
+      <div class="header-actions">
+        <button id="api-key-btn" aria-label="Configure API key" title="Configure API key">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+        <button id="clear-all-btn" aria-label="Remove all waypoints">Clear all</button>
+      </div>
     </div>
     <div id="waypoint-list" role="list"></div>
+    <button id="calc-route-btn" class="hidden" aria-label="Calculate driving route">Calculate Route</button>
+    <div id="route-loading" class="hidden" aria-live="polite">
+      <span class="spinner"></span>
+      <span id="route-loading-text">Calculating route…</span>
+    </div>
+    <div id="route-error" class="hidden" role="alert">
+      <span id="route-error-text">Could not calculate route. The routing service may be temporarily unavailable.</span>
+      <button id="route-retry-btn">Try again</button>
+    </div>
     <div id="route-stats" class="hidden" aria-live="polite">
       <div class="stat-row">
         <span class="stat-label">Distance</span>
@@ -27,7 +46,44 @@
         <span id="stat-duration" class="stat-value">—</span>
       </div>
     </div>
+
+    <div id="playback-panel" class="hidden">
+      <div id="playback-controls">
+        <button id="btn-reset" class="ctrl-btn" aria-label="Reset animation">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+               fill="currentColor" stroke="none">
+            <polygon points="19 20 9 12 19 4 19 20"></polygon>
+            <rect x="5" y="4" width="3" height="16" rx="1"></rect>
+          </svg>
+        </button>
+        <button id="btn-play" class="ctrl-btn" aria-label="Play animation">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+               fill="currentColor" stroke="none">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        </button>
+        <button id="btn-pause" class="ctrl-btn hidden" aria-label="Pause animation">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+               fill="currentColor" stroke="none">
+            <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+            <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+          </svg>
+        </button>
+        <div id="speed-control">
+          <label for="speed-slider" class="stat-label">Speed</label>
+          <input type="range" id="speed-slider" min="0" max="2" step="1" value="1"
+                 aria-label="Animation speed" />
+          <span id="speed-label">Med</span>
+        </div>
+      </div>
+    </div>
   </aside>
+
+  <div id="progress-track" class="hidden"
+       role="progressbar" aria-label="Animation progress"
+       aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+    <div id="progress-fill"></div>
+  </div>
 
   <div id="search-container">
     <div id="search-box">
@@ -49,6 +105,34 @@
       </button>
     </div>
     <p id="search-error" class="hidden" role="alert">Place not found.</p>
+  </div>
+
+  <div id="api-key-modal" class="modal-overlay hidden" role="dialog" aria-modal="true"
+       aria-labelledby="modal-title">
+    <div class="modal-box">
+      <button id="modal-close" class="modal-close" aria-label="Close dialog">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+      <h3 id="modal-title">GraphHopper API Key</h3>
+      <p class="modal-desc">
+        Get a free key at
+        <a href="https://graphhopper.com/dashboard/" target="_blank" rel="noopener noreferrer"
+           >graphhopper.com/dashboard</a>
+        — 500 req/day, no credit card required.
+      </p>
+      <input type="text" id="api-key-input"
+             placeholder="Paste your API key here…"
+             autocomplete="off" spellcheck="false"
+             aria-label="GraphHopper API key" />
+      <div class="modal-actions">
+        <button id="api-key-save">Save key</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
