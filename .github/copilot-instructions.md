@@ -19,14 +19,15 @@ TripMapper is a browser-based trip route animator. It is built with **plain HTML
 - `encodeURIComponent` must be used on all user-supplied search queries before URL construction
 - Do not add third-party libraries without explicit user approval
 
-## Current Stage: 1
+## Current Stage: 2
 
-Stage 1 is complete:
-- Full-screen Leaflet map defaulting to the continental US
-- Search bar (top-left) geocoding via Nominatim, flies map to the result
+Stage 2 is complete (builds on Stage 1):
+- Click the map to place up to 26 lettered waypoints (A–Z)
+- Right sidebar lists waypoints with reverse-geocoded names; individual remove + clear-all
+- 2+ waypoints fetch a driving route via OSRM (`router.project-osrm.org`) and draw a blue polyline
+- Route stats (distance in mi/km and estimated drive time) shown at the bottom of the sidebar
 
 ## Upcoming Stages
 
-- Stage 2: Waypoint management and animated route drawing
 - Stage 3: Playback timeline scrubber
 - Stage 4: Export / share functionality

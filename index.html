@@ -11,6 +11,24 @@
 
   <div id="map"></div>
 
+  <aside id="sidebar" aria-label="Waypoints">
+    <div id="sidebar-header">
+      <h2>Waypoints</h2>
+      <button id="clear-all-btn" aria-label="Remove all waypoints">Clear all</button>
+    </div>
+    <div id="waypoint-list" role="list"></div>
+    <div id="route-stats" class="hidden" aria-live="polite">
+      <div class="stat-row">
+        <span class="stat-label">Distance</span>
+        <span id="stat-distance" class="stat-value">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Drive time</span>
+        <span id="stat-duration" class="stat-value">—</span>
+      </div>
+    </div>
+  </aside>
+
   <div id="search-container">
     <div id="search-box">
       <input
