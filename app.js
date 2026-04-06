@@ -8,13 +8,50 @@ const map = L.map('map', { zoomControl: false }).setView([39.5, -98.35], 4);
 // Zoom control at bottom-left — avoids both the search bar (top-left) and sidebar (right)
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution:
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
-    '&copy; <a href="https://carto.com/attributions">CARTO</a>',
-  subdomains: 'abcd',
-  maxZoom: 20,
-}).addTo(map);
+const MAP_THEMES = {
+  positron: {
+    label: 'Positron (Light)',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd', maxZoom: 20, bgColor: '#f8f4ed',
+  },
+  'dark-matter': {
+    label: 'Dark Matter',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd', maxZoom: 20, bgColor: '#121212',
+  },
+  voyager: {
+    label: 'Voyager',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd', maxZoom: 20, bgColor: '#fafaf8',
+  },
+  osm: {
+    label: 'OpenStreetMap',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    subdomains: 'abc', maxZoom: 19, bgColor: '#f2efe9',
+  },
+};
+
+let activeThemeKey   = localStorage.getItem('map_theme') || 'positron';
+let currentTileLayer = null;
+
+function setMapTheme(key) {
+  const theme = MAP_THEMES[key] ?? MAP_THEMES.positron;
+  activeThemeKey = key;
+  localStorage.setItem('map_theme', key);
+  if (currentTileLayer) map.removeLayer(currentTileLayer);
+  currentTileLayer = L.tileLayer(theme.url, {
+    attribution: theme.attribution,
+    subdomains:  theme.subdomains,
+    maxZoom:     theme.maxZoom,
+    crossOrigin: 'anonymous', // required for canvas capture during glTF export
+  }).addTo(map);
+}
+
+setMapTheme(activeThemeKey);
 // ─── Customisation state ─────────────────────────────────────────────────────
 
 let animColor  = localStorage.getItem('anim_color')  || '#ff6b35';
@@ -138,6 +175,7 @@ const routeErrorText    = document.getElementById('route-error-text');
 const routeLoading      = document.getElementById('route-loading');
 const routeLoadingText  = document.getElementById('route-loading-text');
 const clearAllBtn       = document.getElementById('clear-all-btn');
+const exportBtn         = document.getElementById('export-btn');
 
 function refreshSidebar() {
   waypointList.innerHTML = '';
@@ -456,6 +494,10 @@ weightSlider.addEventListener('input', () => {
   setAnimStyle();
 });
 
+const mapThemeSelect = document.getElementById('map-theme');
+mapThemeSelect.value = activeThemeKey;
+mapThemeSelect.addEventListener('change', () => setMapTheme(mapThemeSelect.value));
+
 // ─── Progress bar scrubbing ────────────────────────────────────────────────────
 
 function scrubTo(clientX) {
@@ -654,6 +696,168 @@ searchBtn.addEventListener('click', () => geocodeAndFly(searchInput.value));
 
 searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') geocodeAndFly(searchInput.value);
+});
+
+// ─── glTF export ──────────────────────────────────────────────────────────────────
+
+// Composite all visible Leaflet tiles onto an offscreen canvas.
+// Requires the tile layer to have crossOrigin: 'anonymous' (set at init).
+function captureMapCanvas() {
+  const mapEl = document.getElementById('map');
+  const w = mapEl.offsetWidth;
+  const h = mapEl.offsetHeight;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = MAP_THEMES[activeThemeKey]?.bgColor ?? '#f8f4ed';
+  ctx.fillRect(0, 0, w, h);
+
+  const mapRect = mapEl.getBoundingClientRect();
+  mapEl.querySelectorAll('.leaflet-tile-loaded').forEach((img) => {
+    if (!(img instanceof HTMLImageElement)) return;
+    try {
+      const r = img.getBoundingClientRect();
+      ctx.drawImage(img, r.left - mapRect.left, r.top - mapRect.top, r.width, r.height);
+    } catch {
+      // Image tainted (tile loaded without crossOrigin) — skip it
+    }
+  });
+  return canvas;
+}
+
+async function exportForBlender() {
+  if (!routePoints.length) return;
+
+  exportBtn.disabled = true;
+  exportBtn.textContent = 'Exporting…';
+  let exported = false;
+
+  try {
+    // Lazy-load Three.js (heavy — only loaded on first export)
+    const THREE = await import('three');
+    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+
+    const bounds   = map.getBounds();
+    const center   = bounds.getCenter();
+    const lngSpan  = bounds.getEast()  - bounds.getWest();
+    const latSpan  = bounds.getNorth() - bounds.getSouth();
+
+    // Scale plane so its longest side = 10 Blender units
+    const mapEl  = document.getElementById('map');
+    const aspect = mapEl.offsetWidth / mapEl.offsetHeight;
+    const planeW = aspect >= 1 ? 10 : 10 * aspect;
+    const planeH = aspect >= 1 ? 10 / aspect : 10;
+
+    // ── Map plane ──────────────────────────────────────────────────
+    const mapCanvas = captureMapCanvas();
+    const texture   = new THREE.CanvasTexture(mapCanvas);
+    // Use the default flipY=true — GLTFExporter compensates by flipping UV V coords,
+    // so the exported file has correct north-south orientation in Blender.
+
+    const planeGeo = new THREE.PlaneGeometry(planeW, planeH);
+    // Rotate so the plane lies flat (XZ plane) in Y-up glTF space
+    planeGeo.rotateX(-Math.PI / 2);
+    const planeMat  = new THREE.MeshStandardMaterial({ map: texture });
+    const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+    planeMesh.name  = 'MapPlane';
+
+    // ── Route tube ────────────────────────────────────────────────
+    const pts = routePoints.map(([lat, lng]) => new THREE.Vector3(
+      ((lng - center.lng) / lngSpan) * planeW,
+      0.02,                                           // slightly above the plane
+      -((lat - center.lat) / latSpan) * planeH        // −z = north in Y-up
+    ));
+
+    const curve   = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const tubeGeo = new THREE.TubeGeometry(
+      curve,
+      Math.min(pts.length * 3, 1200), // segments
+      planeW * 0.004,                 // tube radius ≈ 0.4% of plane width
+      8,                              // radial segments
+      false
+    );
+
+    const tubeColor = new THREE.Color(animColor);
+    const tubeMat   = new THREE.MeshStandardMaterial({
+      color:             tubeColor,
+      emissive:          tubeColor,
+      emissiveIntensity: 3,
+      roughness:         0.1,
+      metalness:         0.1,
+    });
+    const routeMesh = new THREE.Mesh(tubeGeo, tubeMat);
+    routeMesh.name  = 'Route';
+
+    // ── Scene & export ──────────────────────────────────────────────
+    const scene = new THREE.Scene();
+    scene.add(planeMesh, routeMesh);
+
+    const exporter = new GLTFExporter();
+    // parseAsync returns a clean Promise — avoids the callback-timing issues
+    // that previously prevented openBlenderModal from firing reliably.
+    const glb = await exporter.parseAsync(scene, { binary: true });
+
+    const blob = new Blob([glb], { type: 'application/octet-stream' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'tripmapper-route.glb';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    exported = true;
+
+  } catch (err) {
+    console.error('[TripMapper] Export failed:', err);
+    alert('Export failed: ' + (err?.message ?? err));
+  } finally {
+    exportBtn.disabled = false;
+    exportBtn.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      Export for Blender`;
+  }
+
+  if (exported) openBlenderModal();
+}
+
+exportBtn.addEventListener('click', exportForBlender);
+
+// ─── Blender instructions modal ────────────────────────────────────────────────────
+
+const blenderModal      = document.getElementById('blender-modal');
+const blenderModalClose = document.getElementById('blender-modal-close');
+
+function openBlenderModal() {
+  // Look up the element fresh rather than relying on a captured reference,
+  // and force display with an inline style as a belt-and-suspenders measure.
+  const el = document.getElementById('blender-modal');
+  if (!el) { console.error('[TripMapper] blender-modal element not found'); return; }
+  el.classList.remove('hidden');
+  el.style.display = 'flex';
+}
+function closeBlenderModal() {
+  const el = document.getElementById('blender-modal');
+  if (!el) return;
+  el.style.display = '';
+  el.classList.add('hidden');
+}
+
+blenderModalClose.addEventListener('click', closeBlenderModal);
+blenderModal.addEventListener('click', (e) => { if (e.target === blenderModal) closeBlenderModal(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const el = document.getElementById('blender-modal');
+    if (el && el.style.display !== 'none' && !el.classList.contains('hidden')) closeBlenderModal();
+  }
 });
 
 // ─── Mobile sidebar toggle ────────────────────────────────────────────────────

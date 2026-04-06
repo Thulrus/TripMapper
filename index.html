@@ -6,6 +6,14 @@
   <title>TripMapper</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
 
@@ -27,6 +35,19 @@
       </div>
     </div>
     <div id="waypoint-list" role="list"></div>
+
+    <div id="map-controls">
+      <div class="style-row">
+        <label for="map-theme" class="stat-label">Map</label>
+        <select id="map-theme" aria-label="Map tile theme">
+          <option value="positron">Positron (Light)</option>
+          <option value="dark-matter">Dark Matter</option>
+          <option value="voyager">Voyager</option>
+          <option value="osm">OpenStreetMap</option>
+        </select>
+      </div>
+    </div>
+
     <button id="calc-route-btn" class="hidden" aria-label="Calculate driving route">Calculate Route</button>
     <div id="route-loading" class="hidden" aria-live="polite">
       <span class="spinner"></span>
@@ -88,6 +109,16 @@
           <span id="anim-weight-label" class="stat-value">5</span>
         </div>
       </div>
+      <button id="export-btn" aria-label="Export scene for Blender">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Export for Blender
+      </button>
     </div>
   </aside>
 
@@ -148,6 +179,27 @@
       <div class="modal-actions">
         <button id="api-key-save">Save key</button>
       </div>
+    </div>
+  </div>
+
+  <div id="blender-modal" class="modal-overlay hidden" role="dialog" aria-modal="true"
+       aria-labelledby="blender-modal-title">
+    <div class="modal-box">
+      <button id="blender-modal-close" class="modal-close" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+      <h3 id="blender-modal-title">&#x2713; Downloaded! Open in Blender</h3>
+      <ol class="blender-steps">
+        <li><strong>File &gt; Import &gt; glTF 2.0</strong> &mdash; select your <code>.glb</code></li>
+        <li>Select the <strong>Route</strong> object in the scene list</li>
+        <li>Add a <strong>Build</strong> modifier &mdash; set <em>Frame Start: 1</em>, <em>Frame End</em> to your target frame to animate the route drawing itself on</li>
+        <li>For the glow: in <strong>Render Properties</strong> switch to <strong>EEVEE</strong> and enable <strong>Bloom</strong> &mdash; the Route material already has a high Emission</li>
+      </ol>
     </div>
   </div>
 

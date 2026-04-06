@@ -529,6 +529,13 @@ html, body {
   transition: width 0.05s linear;
 }
 
+/* ─── Map controls (always visible) ────────────────────────── */
+#map-controls {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+}
+
 /* ─── Style controls (color + width) ────────────────────────── */
 #style-controls {
   border-top: 1px solid var(--border);
@@ -589,6 +596,23 @@ html, body {
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   border: none;
+}
+
+.style-row select {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 3px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.style-row select:focus {
+  border-color: var(--accent);
 }
 
 /* ─── Waypoint label inline input ─────────────────────── */
@@ -685,7 +709,9 @@ html, body {
     margin-bottom: 10px;
     margin-left: 10px;
   }
-} ────────────────────────────────────── */
+}
+
+/* ─── API key modal ──────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -797,4 +823,62 @@ html, body {
 
 #api-key-save:hover {
   opacity: 0.85;
+}
+
+/* ─── Export for Blender button ──────────────────────────────── */
+#export-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: calc(100% - 16px);
+  margin: 0 8px 12px;
+  padding: 9px 12px;
+  background: #2a2a2a;
+  border: 1px solid #e87d0d;
+  border-radius: var(--radius);
+  color: #e87d0d;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+#export-btn:hover:not(:disabled) {
+  background: #e87d0d;
+  color: #fff;
+}
+
+#export-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* ─── Blender instructions modal ─────────────────────────────── */
+.blender-steps {
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.blender-steps li {
+  padding-left: 4px;
+}
+
+.blender-steps strong {
+  color: var(--text-primary);
+}
+
+.blender-steps code {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: var(--accent);
 }
