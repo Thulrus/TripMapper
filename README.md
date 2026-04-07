@@ -2,24 +2,33 @@
 
 A browser-based trip route animator built with plain HTML, CSS, and JavaScript — no frameworks, no build step.
 
-## Features (Stage 1)
+Live at: https://thulrus.github.io/TripMapper/
+
+## Features
 
 - Full-screen interactive map powered by [Leaflet.js](https://leafletjs.com/)
-- Clean CartoDB Positron tile layer sourced from OpenStreetMap
-- Place search geocoded via the [Nominatim API](https://nominatim.openstreetmap.org/)
-- Smooth fly-to animation when a result is found
-- Minimal dark-themed UI
+- Place search geocoded via [Nominatim](https://nominatim.openstreetmap.org/)
+- Add, label, reorder, and remove waypoints
+- Driving route calculation via [GraphHopper](https://graphhopper.com/) with distance and drive-time stats
+- Animated route playback with speed control
+- Customizable route color and line width with a CSS glow effect
+- Multiple map themes: Positron, Dark Matter, Voyager, OpenStreetMap
+- Export route as a glTF (.glb) file for use in Blender
+- API key stored in localStorage and configurable via in-app settings
 
-## Getting Started
+## Usage
 
-No installation required. Open `index.html` directly in a browser, or serve it locally for best results (avoids CORS on local assets):
+Open https://thulrus.github.io/TripMapper/ in a browser. No installation required.
+
+To run locally:
 
 ```bash
-# Python 3
 python3 -m http.server 8080
 ```
 
 Then visit `http://localhost:8080`.
+
+A free [GraphHopper API key](https://graphhopper.com/dashboard/) is required for route calculation (500 req/day, no credit card). Enter it via the settings button in the app.
 
 ## Project Structure
 
@@ -27,23 +36,19 @@ Then visit `http://localhost:8080`.
 TripMapper/
 ├── index.html      # Entry point
 ├── style.css       # All styling
-├── app.js          # Map logic and search
+├── app.js          # All application logic
 └── README.md
 ```
 
 ## Tech Stack
 
-| Layer       | Choice                                                                 |
-|-------------|------------------------------------------------------------------------|
-| Map library | [Leaflet.js 1.9.4](https://leafletjs.com/) via CDN                    |
-| Map tiles   | [CartoDB Positron](https://carto.com/basemaps/) via OpenStreetMap      |
-| Geocoding   | [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap)      |
-
-## Roadmap
-
-- **Stage 2** — Add waypoints and draw animated trip routes on the map
-- **Stage 3** — Timeline scrubber to control animation playback
-- **Stage 4** — Export route as shareable link or image
+| Layer      | Choice                                                            |
+|------------|-------------------------------------------------------------------|
+| Map        | [Leaflet.js 1.9.4](https://leafletjs.com/) via CDN               |
+| Map tiles  | [CartoDB](https://carto.com/basemaps/) / OpenStreetMap            |
+| Geocoding  | [Nominatim](https://nominatim.openstreetmap.org/)                 |
+| Routing    | [GraphHopper Directions API](https://graphhopper.com/)            |
+| 3D export  | [Three.js](https://threejs.org/) via CDN (glTF export)            |
 
 ## License
 
