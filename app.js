@@ -739,14 +739,11 @@ async function exportForBlender() {
     const THREE = await import('three');
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
 
-    const bounds   = map.getBounds();
-    const center   = bounds.getCenter();
-    const lngSpan  = bounds.getEast()  - bounds.getWest();
-    const latSpan  = bounds.getNorth() - bounds.getSouth();
-
     // Scale plane so its longest side = 10 Blender units
     const mapEl  = document.getElementById('map');
-    const aspect = mapEl.offsetWidth / mapEl.offsetHeight;
+    const w      = mapEl.offsetWidth;
+    const h      = mapEl.offsetHeight;
+    const aspect = w / h;
     const planeW = aspect >= 1 ? 10 : 10 * aspect;
     const planeH = aspect >= 1 ? 10 / aspect : 10;
 
@@ -764,18 +761,43 @@ async function exportForBlender() {
     planeMesh.name  = 'MapPlane';
 
     // ── Route tube ────────────────────────────────────────────────
-    const pts = routePoints.map(([lat, lng]) => new THREE.Vector3(
-      ((lng - center.lng) / lngSpan) * planeW,
-      0.02,                                           // slightly above the plane
-      -((lat - center.lat) / latSpan) * planeH        // −z = north in Y-up
-    ));
+    // Project all route points using Leaflet's Mercator for pixel-perfect
+    // alignment with the captured map texture.
+    const rawPts = routePoints.map(([lat, lng]) => {
+      const px = map.latLngToContainerPoint([lat, lng]);
+      return new THREE.Vector3(
+        (px.x / w - 0.5) * planeW,
+        0.02,
+        (px.y / h - 0.5) * planeH,
+      );
+    });
 
-    const curve   = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    // Pass 1 — moving-average smooth.
+    // Dense GPS points cause high-frequency direction changes that make
+    // CatmullRom oscillate ("lumpy mess"). Smoothing removes the jitter
+    // so the spline has no reason to overshoot after we decimate in pass 2.
+    const SMOOTH_R = 5;
+    const smoothed = rawPts.map((_, i) => {
+      const j0 = Math.max(0, i - SMOOTH_R);
+      const j1 = Math.min(rawPts.length - 1, i + SMOOTH_R);
+      let x = 0, z = 0, n = 0;
+      for (let j = j0; j <= j1; j++) { x += rawPts[j].x; z += rawPts[j].z; n++; }
+      return new THREE.Vector3(x / n, 0.02, z / n);
+    });
+
+    // Pass 2 — decimate smoothed points to ≤200 control points.
+    // With smooth input, CatmullRom between widely-spaced control points won't
+    // overshoot, so the tube stays within the plane bounds.
+    const MAX_CTRL = 200;
+    const step = Math.max(1, Math.ceil(smoothed.length / MAX_CTRL));
+    const ctrlPts = smoothed.filter((_, i) => i % step === 0 || i === smoothed.length - 1);
+
+    const curve   = new THREE.CatmullRomCurve3(ctrlPts, false, 'centripetal');
     const tubeGeo = new THREE.TubeGeometry(
       curve,
-      Math.min(pts.length * 3, 1200), // segments
-      planeW * 0.004,                 // tube radius ≈ 0.4% of plane width
-      8,                              // radial segments
+      1200,          // tube segments — high resolution, independent of control count
+      planeW * 0.004,
+      8,
       false
     );
 
@@ -790,9 +812,16 @@ async function exportForBlender() {
     const routeMesh = new THREE.Mesh(tubeGeo, tubeMat);
     routeMesh.name  = 'Route';
 
+    // ── Center-line (raw sampled curve, no tube) ───────────────────
+    const centerPts    = curve.getPoints(500);
+    const centerGeo    = new THREE.BufferGeometry().setFromPoints(centerPts);
+    const centerMat    = new THREE.LineBasicMaterial({ color: tubeColor });
+    const centerLine   = new THREE.Line(centerGeo, centerMat);
+    centerLine.name    = 'RouteCenterLine';
+
     // ── Scene & export ──────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.add(planeMesh, routeMesh);
+    scene.add(planeMesh, routeMesh, centerLine);
 
     const exporter = new GLTFExporter();
     // parseAsync returns a clean Promise — avoids the callback-timing issues
