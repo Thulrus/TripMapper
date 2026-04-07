@@ -176,6 +176,7 @@ const routeLoading      = document.getElementById('route-loading');
 const routeLoadingText  = document.getElementById('route-loading-text');
 const clearAllBtn       = document.getElementById('clear-all-btn');
 const exportBtn         = document.getElementById('export-btn');
+const exportLabelsCheck = document.getElementById('export-labels');
 
 function refreshSidebar() {
   waypointList.innerHTML = '';
@@ -237,6 +238,7 @@ function updateMarkerTooltip(wp) {
       direction: 'top',
       offset: [0, -18],
       className: 'wp-tooltip',
+      permanent: !!wp.label,
     });
   } else {
     wp.marker.unbindTooltip();
@@ -727,6 +729,11 @@ function captureMapCanvas() {
   return canvas;
 }
 
+// Cached Three.js addon modules and font — lazily loaded on first label export
+let _FontLoader   = null;
+let _TextGeometry = null;
+let _labelFont    = null;
+
 async function exportForBlender() {
   if (!routePoints.length) return;
 
@@ -819,9 +826,80 @@ async function exportForBlender() {
     const centerLine   = new THREE.Line(centerGeo, centerMat);
     centerLine.name    = 'RouteCenterLine';
 
+    // ── Waypoint label meshes ───────────────────────────────────────
+    const labelMeshes = [];
+    if (exportLabelsCheck.checked) {
+      const labelsToExport = waypoints
+        .map((wp) => ({ text: wp.label || wp.placeName, latlng: wp.latlng }))
+        .filter((l) => l.text);
+
+      if (labelsToExport.length > 0) {
+        try {
+          if (!_FontLoader || !_TextGeometry) {
+            try {
+              if (!_FontLoader) {
+                ({ FontLoader: _FontLoader } = await import('three/addons/loaders/FontLoader.js'));
+              }
+              if (!_TextGeometry) {
+                ({ TextGeometry: _TextGeometry } = await import('three/addons/geometries/TextGeometry.js'));
+              }
+            } catch (err) {
+              _FontLoader = null;
+              _TextGeometry = null;
+              throw err;
+            }
+          }
+          if (!_labelFont) {
+            const fontLoader = new _FontLoader();
+            _labelFont = await new Promise((resolve, reject) => {
+              fontLoader.load(
+                'https://cdn.jsdelivr.net/npm/three@0.163.0/examples/fonts/helvetiker_regular.typeface.json',
+                resolve,
+                undefined,
+                reject,
+              );
+            });
+          }
+
+          const labelColor = new THREE.Color('#ffffff');
+          const labelMat = new THREE.MeshStandardMaterial({
+            color:             labelColor,
+            emissive:          labelColor,
+            emissiveIntensity: 1.5,
+          });
+
+          for (const { text, latlng } of labelsToExport) {
+            const textGeo = new _TextGeometry(text, {
+              font:  _labelFont,
+              size:  planeW * 0.018,
+              depth: planeW * 0.003,
+            });
+            textGeo.computeBoundingBox();
+            const bb = textGeo.boundingBox;
+            // Center horizontally before rotating to lie flat
+            textGeo.translate(-(bb.max.x + bb.min.x) / 2, 0, 0);
+            textGeo.rotateX(-Math.PI / 2);
+
+            const px = map.latLngToContainerPoint(latlng);
+            const lx = (px.x / w - 0.5) * planeW;
+            const lz = (px.y / h - 0.5) * planeH;
+
+            const textMesh = new THREE.Mesh(textGeo, labelMat);
+            // Slightly elevated above the route tube and offset northward so
+            // the label sits just above its waypoint marker
+            textMesh.position.set(lx, 0.08, lz - planeH * 0.025);
+            textMesh.name = `Label_${text}`;
+            labelMeshes.push(textMesh);
+          }
+        } catch (err) {
+          console.warn('[TripMapper] Failed to export labels; continuing with route export only:', err.message ?? err);
+        }
+      }
+    }
+
     // ── Scene & export ──────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.add(planeMesh, routeMesh, centerLine);
+    scene.add(planeMesh, routeMesh, centerLine, ...labelMeshes);
 
     const exporter = new GLTFExporter();
     // parseAsync returns a clean Promise — avoids the callback-timing issues
