@@ -629,6 +629,20 @@ html, body {
   min-width: 0;
 }
 
+/* ─── Export-labels checkbox row ─────────────────────── */
+#export-labels {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.stat-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* ─── Leaflet tooltip (waypoint labels) ─────────────── */
 .leaflet-tooltip.wp-tooltip {
   background: var(--bg-elevated);
