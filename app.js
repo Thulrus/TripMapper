@@ -835,9 +835,19 @@ async function exportForBlender() {
 
       if (labelsToExport.length > 0) {
         try {
-          if (!_FontLoader) {
-            ({ FontLoader: _FontLoader }   = await import('three/addons/loaders/FontLoader.js'));
-            ({ TextGeometry: _TextGeometry } = await import('three/addons/geometries/TextGeometry.js'));
+          if (!_FontLoader || !_TextGeometry) {
+            try {
+              if (!_FontLoader) {
+                ({ FontLoader: _FontLoader } = await import('three/addons/loaders/FontLoader.js'));
+              }
+              if (!_TextGeometry) {
+                ({ TextGeometry: _TextGeometry } = await import('three/addons/geometries/TextGeometry.js'));
+              }
+            } catch (err) {
+              _FontLoader = null;
+              _TextGeometry = null;
+              throw err;
+            }
           }
           if (!_labelFont) {
             const fontLoader = new _FontLoader();
