@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>TripMapper</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
@@ -43,7 +44,7 @@
           <option value="positron">Positron (Light)</option>
           <option value="dark-matter">Dark Matter</option>
           <option value="voyager">Voyager</option>
-          <option value="osm">OpenStreetMap</option>
+          <option value="osm">Street Map</option>
         </select>
       </div>
     </div>
@@ -98,6 +99,7 @@
         </div>
       </div>
       <div id="style-controls">
+        <p class="section-caption">Animation</p>
         <div class="style-row">
           <label for="anim-color" class="stat-label">Color</label>
           <input type="color" id="anim-color" value="#ff6b35" aria-label="Animation line color" />
@@ -108,11 +110,18 @@
                  aria-label="Animation line thickness" />
           <span id="anim-weight-label" class="stat-value">5</span>
         </div>
+        <p class="section-caption">3D Export</p>
         <div class="style-row">
           <label for="export-labels" class="stat-label">Labels</label>
           <input type="checkbox" id="export-labels" checked
                  aria-label="Include waypoint labels in 3D export" />
           <span class="stat-note">Include in export</span>
+        </div>
+        <div class="style-row">
+          <label for="smooth-slider" class="stat-label">Smooth</label>
+          <input type="range" id="smooth-slider" min="0" max="4" step="1" value="1"
+                 aria-label="Route smoothing level" />
+          <span id="smooth-label" class="stat-value">Light</span>
         </div>
       </div>
       <button id="export-btn" aria-label="Export scene for Blender">

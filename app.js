@@ -28,10 +28,12 @@ const MAP_THEMES = {
     subdomains: 'abcd', maxZoom: 20, bgColor: '#fafaf8',
   },
   osm: {
-    label: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    subdomains: 'abc', maxZoom: 19, bgColor: '#f2efe9',
+    label: 'Street Map',
+    // ESRI World Street Map — free, no API key, no Referer requirement.
+    // Built on OSM data; tile path is z/row/col (= z/y/x in Leaflet notation).
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Source: Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    subdomains: '', maxZoom: 17, bgColor: '#e5e3df',
   },
 };
 
@@ -45,9 +47,8 @@ function setMapTheme(key) {
   if (currentTileLayer) map.removeLayer(currentTileLayer);
   currentTileLayer = L.tileLayer(theme.url, {
     attribution: theme.attribution,
-    subdomains:  theme.subdomains,
+    subdomains:  theme.subdomains || '',
     maxZoom:     theme.maxZoom,
-    crossOrigin: 'anonymous', // required for canvas capture during glTF export
   }).addTo(map);
 }
 
@@ -75,6 +76,71 @@ const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 // Each entry: { id, latlng, marker, placeName, label }
 const waypoints = [];
 let nextId = 0;
+
+// ─── State persistence ───────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'tripmapper_state';
+
+function saveState() {
+  const state = {
+    waypoints: waypoints.map((wp) => ({
+      lat: wp.latlng.lat,
+      lng: wp.latlng.lng,
+      label:     wp.label,
+      placeName: wp.placeName,
+    })),
+    routePoints,
+    statDistance: document.getElementById('stat-distance').textContent,
+    statDuration: document.getElementById('stat-duration').textContent,
+  };
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+}
+
+// Restores waypoints and route from localStorage on page load.
+// Runs after all DOM refs and helper functions are defined (called at bottom of file).
+function restoreState() {
+  let state;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    state = JSON.parse(raw);
+  } catch { return; }
+
+  const { waypoints: saved = [], routePoints: savedRoute = [],
+          statDistance = '', statDuration = '' } = state;
+  if (!saved.length) return;
+
+  for (const { lat, lng, label, placeName } of saved) {
+    const index = waypoints.length;
+    const id    = nextId++;
+    const latlng = L.latLng(lat, lng);
+    const marker = L.marker(latlng, { icon: makeIcon(index), draggable: true }).addTo(map);
+    const wp = { id, latlng, marker, placeName: placeName ?? null, label: label || '' };
+    waypoints.push(wp);
+    wireMarkerDrag(wp);
+    updateMarkerTooltip(wp);
+  }
+  refreshSidebar();
+
+  if (savedRoute.length > 1) {
+    routePoints = savedRoute;
+    cumDist     = buildCumDist(routePoints);
+    routeLayer  = L.polyline(routePoints, {
+      color: '#5b8dee', weight: 4, opacity: 0.85,
+      lineJoin: 'round', lineCap: 'round',
+    }).addTo(map);
+    if (statDistance) document.getElementById('stat-distance').textContent = statDistance;
+    if (statDuration) document.getElementById('stat-duration').textContent = statDuration;
+    routeStats.classList.remove('hidden');
+    setPlayingState(false);
+    progressFill.style.width = '0%';
+    playbackPanel.classList.remove('hidden');
+    progressTrack.classList.remove('hidden');
+  }
+
+  const bounds = L.latLngBounds(waypoints.map((wp) => wp.latlng));
+  map.fitBounds(bounds, { padding: [60, 60] });
+}
 let routeLayer = null;
 let promptLabelId = null; // id of the most recently placed waypoint (auto-prompts label edit)
 
@@ -104,15 +170,40 @@ function makeIcon(index) {
 
 // ─── Waypoint operations ─────────────────────────────────────────────────────
 
+// Attach a dragend listener so the user can reposition any waypoint on the map.
+function wireMarkerDrag(wp) {
+  wp.marker.on('dragend', () => {
+    wp.latlng    = wp.marker.getLatLng();
+    wp.placeName = null;
+    updateMarkerTooltip(wp);
+    clearRoute();
+    refreshSidebar();
+    saveState();
+    fetchPlaceName(wp.latlng).then((name) => {
+      if (!name) return;
+      wp.placeName = name;
+      updateMarkerTooltip(wp);
+      if (!wp.label) {
+        const el = waypointList.querySelector(`span[data-wp-id="${wp.id}"]`);
+        if (el) el.textContent = name;
+      }
+      saveState();
+    });
+  });
+}
+
 function addWaypoint(latlng) {
   if (waypoints.length >= LABELS.length) return; // cap at 26
   const index = waypoints.length;
   const id = nextId++;
-  const marker = L.marker(latlng, { icon: makeIcon(index) }).addTo(map);
-  waypoints.push({ id, latlng, marker, placeName: null, label: '' });
+  const marker = L.marker(latlng, { icon: makeIcon(index), draggable: true }).addTo(map);
+  const wp = { id, latlng, marker, placeName: null, label: '' };
+  waypoints.push(wp);
+  wireMarkerDrag(wp);
   promptLabelId = id;
   clearRoute();
   refreshSidebar();
+  saveState();
 
   // Fetch a human-readable place name asynchronously
   fetchPlaceName(latlng).then((name) => {
@@ -126,6 +217,7 @@ function addWaypoint(latlng) {
       const el = waypointList.querySelector(`span[data-wp-id="${id}"]`);
       if (el) el.textContent = name;
     }
+    saveState();
   });
 }
 
@@ -136,6 +228,7 @@ function removeWaypoint(index) {
   waypoints.forEach((wp, i) => wp.marker.setIcon(makeIcon(i)));
   clearRoute();
   refreshSidebar();
+  saveState();
 }
 
 function clearWaypoints() {
@@ -143,6 +236,7 @@ function clearWaypoints() {
   waypoints.length = 0;
   clearRoute();
   refreshSidebar();
+  saveState();
 }
 
 // ─── Reverse geocoding (Nominatim) ───────────────────────────────────────────
@@ -177,6 +271,24 @@ const routeLoadingText  = document.getElementById('route-loading-text');
 const clearAllBtn       = document.getElementById('clear-all-btn');
 const exportBtn         = document.getElementById('export-btn');
 const exportLabelsCheck = document.getElementById('export-labels');
+const smoothSlider      = document.getElementById('smooth-slider');
+const smoothLabel       = document.getElementById('smooth-label');
+
+// Paired [SMOOTH_R, MAX_CTRL] per smoothing level.
+// Higher SMOOTH_R widens the moving-average window; lower MAX_CTRL keeps
+// fewer CatmullRom control points → progressively less route detail.
+const SMOOTH_PARAMS = [
+  { r: 0,  ctrl: 400 }, // None  — raw GPS points, full detail
+  { r: 3,  ctrl: 250 }, // Light
+  { r: 8,  ctrl: 150 }, // Med
+  { r: 20, ctrl: 80  }, // Heavy
+  { r: 50, ctrl: 30  }, // Max   — major turns only
+];
+const SMOOTH_LABELS = ['None', 'Light', 'Med', 'Heavy', 'Max'];
+
+smoothSlider.addEventListener('input', () => {
+  smoothLabel.textContent = SMOOTH_LABELS[Number(smoothSlider.value)];
+});
 
 function refreshSidebar() {
   waypointList.innerHTML = '';
@@ -258,6 +370,7 @@ function startLabelEdit(wp, spanEl) {
   const finish = () => {
     wp.label = input.value.trim();
     updateMarkerTooltip(wp);
+    saveState();
     const span = document.createElement('span');
     span.className = 'wp-name';
     span.dataset.wpId = wp.id;
@@ -639,6 +752,7 @@ async function updateRoute() {
   progressFill.style.width = '0%';
   playbackPanel.classList.remove('hidden');
   progressTrack.classList.remove('hidden');
+  saveState();
 }
 
 // ─── Map click → place waypoint ──────────────────────────────────────────────
@@ -702,31 +816,100 @@ searchInput.addEventListener('keydown', (e) => {
 
 // ─── glTF export ──────────────────────────────────────────────────────────────────
 
-// Composite all visible Leaflet tiles onto an offscreen canvas.
-// Requires the tile layer to have crossOrigin: 'anonymous' (set at init).
-function captureMapCanvas() {
-  const mapEl = document.getElementById('map');
-  const w = mapEl.offsetWidth;
-  const h = mapEl.offsetHeight;
+// Fetch map tiles that cover the full route bounding box at the best available
+// zoom level. Completely independent of the user's current viewport — the export
+// always covers the entire route at consistent, route-centred resolution.
+async function captureRouteTiles() {
+  // ── 1. Padded bounding box ─────────────────────────────────────────────────
+  const lats = routePoints.map(([lat]) => lat);
+  const lngs = routePoints.map(([, lng]) => lng);
+  waypoints.forEach((wp) => { lats.push(wp.latlng.lat); lngs.push(wp.latlng.lng); });
+
+  let south = Math.min(...lats), north = Math.max(...lats);
+  let west  = Math.min(...lngs), east  = Math.max(...lngs);
+
+  const latSpan = Math.max(north - south, 0.001);
+  const lngSpan = Math.max(east  - west,  0.001);
+  const PAD = 0.12; // 12 % breathing room on each side
+  south = Math.max(south - latSpan * PAD, -85.05113);
+  north = Math.min(north + latSpan * PAD,  85.05113);
+  west  = Math.max(west  - lngSpan * PAD, -180);
+  east  = Math.min(east  + lngSpan * PAD,  180);
+
+  // ── 2. Web Mercator tile coordinate helpers ────────────────────────────────
+  const toTileF = (lat, lng, z) => {
+    const n   = 1 << z;
+    const tx  = (lng + 180) / 360 * n;
+    const rad = lat * Math.PI / 180;
+    const ty  = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
+    return { tx, ty };
+  };
+
+  // ── 3. Choose highest zoom where the tile grid fits within MAX_TILES×MAX_TILES ──
+  const MAX_TILES = 8; // → max canvas ~2048 × 2048 px
+  let z = 16;
+  while (z > 1) {
+    const { tx: x0, ty: y0 } = toTileF(north, west, z);
+    const { tx: x1, ty: y1 } = toTileF(south, east, z);
+    if ((x1 - x0) <= MAX_TILES && (y1 - y0) <= MAX_TILES) break;
+    z--;
+  }
+
+  const { tx: fx0, ty: fy0 } = toTileF(north, west, z);
+  const { tx: fx1, ty: fy1 } = toTileF(south, east, z);
+  const tMinX = Math.floor(fx0), tMaxX = Math.floor(fx1);
+  const tMinY = Math.floor(fy0), tMaxY = Math.floor(fy1);
+
+  const canvasW = (tMaxX - tMinX + 1) * 256;
+  const canvasH = (tMaxY - tMinY + 1) * 256;
+
+  // ── 4. Offscreen canvas ────────────────────────────────────────────────────
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width  = canvasW;
+  canvas.height = canvasH;
   const ctx = canvas.getContext('2d');
-
   ctx.fillStyle = MAP_THEMES[activeThemeKey]?.bgColor ?? '#f8f4ed';
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const mapRect = mapEl.getBoundingClientRect();
-  mapEl.querySelectorAll('.leaflet-tile-loaded').forEach((img) => {
-    if (!(img instanceof HTMLImageElement)) return;
-    try {
-      const r = img.getBoundingClientRect();
-      ctx.drawImage(img, r.left - mapRect.left, r.top - mapRect.top, r.width, r.height);
-    } catch {
-      // Image tainted (tile loaded without crossOrigin) — skip it
+  // ── 5. Fetch tiles ─────────────────────────────────────────────────────────
+  const theme  = MAP_THEMES[activeThemeKey] ?? MAP_THEMES.positron;
+  const subs   = theme.subdomains ?? 'abcd';
+  let   subIdx = 0;
+  const nextSub = () => { const s = subs[subIdx % subs.length]; subIdx++; return s; };
+
+  const tilePromises = [];
+  for (let ty = tMinY; ty <= tMaxY; ty++) {
+    for (let tx = tMinX; tx <= tMaxX; tx++) {
+      const url = theme.url
+        .replace('{z}', z)
+        .replace('{x}', tx)
+        .replace('{y}', ty)
+        .replace('{r}', '')       // standard 256 px tiles (no @2x suffix)
+        .replace('{s}', nextSub());
+      const dx = (tx - tMinX) * 256;
+      const dy = (ty - tMinY) * 256;
+      tilePromises.push(
+        new Promise((resolve) => {
+          const img = new Image();
+          img.referrerPolicy = 'no-referrer-when-downgrade';
+          img.crossOrigin = 'anonymous';
+          img.onload  = () => { try { ctx.drawImage(img, dx, dy, 256, 256); } catch {} resolve(); };
+          img.onerror = resolve;
+          img.src = url;
+        }),
+      );
     }
-  });
-  return canvas;
+  }
+  await Promise.all(tilePromises);
+
+  // ── 6. Projection helper ───────────────────────────────────────────────────
+  // Maps (lat, lng) → pixel coordinates on the captured canvas.
+  const projectLatLng = (lat, lng) => {
+    const { tx, ty } = toTileF(lat, lng, z);
+    return { px: (tx - tMinX) * 256, py: (ty - tMinY) * 256 };
+  };
+
+  return { canvas, projectLatLng, canvasW, canvasH };
 }
 
 // Cached Three.js addon modules and font — lazily loaded on first label export
@@ -746,16 +929,14 @@ async function exportForBlender() {
     const THREE = await import('three');
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
 
+    // Fetch tiles covering the full route at the best zoom — fully viewport-independent
+    const { canvas: mapCanvas, projectLatLng, canvasW, canvasH } = await captureRouteTiles();
     // Scale plane so its longest side = 10 Blender units
-    const mapEl  = document.getElementById('map');
-    const w      = mapEl.offsetWidth;
-    const h      = mapEl.offsetHeight;
-    const aspect = w / h;
+    const aspect = canvasW / canvasH;
     const planeW = aspect >= 1 ? 10 : 10 * aspect;
     const planeH = aspect >= 1 ? 10 / aspect : 10;
 
     // ── Map plane ──────────────────────────────────────────────────
-    const mapCanvas = captureMapCanvas();
     const texture   = new THREE.CanvasTexture(mapCanvas);
     // Use the default flipY=true — GLTFExporter compensates by flipping UV V coords,
     // so the exported file has correct north-south orientation in Blender.
@@ -771,11 +952,11 @@ async function exportForBlender() {
     // Project all route points using Leaflet's Mercator for pixel-perfect
     // alignment with the captured map texture.
     const rawPts = routePoints.map(([lat, lng]) => {
-      const px = map.latLngToContainerPoint([lat, lng]);
+      const { px, py } = projectLatLng(lat, lng);
       return new THREE.Vector3(
-        (px.x / w - 0.5) * planeW,
+        (px / canvasW - 0.5) * planeW,
         0.02,
-        (px.y / h - 0.5) * planeH,
+        (py / canvasH - 0.5) * planeH,
       );
     });
 
@@ -783,7 +964,7 @@ async function exportForBlender() {
     // Dense GPS points cause high-frequency direction changes that make
     // CatmullRom oscillate ("lumpy mess"). Smoothing removes the jitter
     // so the spline has no reason to overshoot after we decimate in pass 2.
-    const SMOOTH_R = 5;
+    const { r: SMOOTH_R, ctrl: MAX_CTRL } = SMOOTH_PARAMS[Number(smoothSlider.value)];
     const smoothed = rawPts.map((_, i) => {
       const j0 = Math.max(0, i - SMOOTH_R);
       const j1 = Math.min(rawPts.length - 1, i + SMOOTH_R);
@@ -792,10 +973,9 @@ async function exportForBlender() {
       return new THREE.Vector3(x / n, 0.02, z / n);
     });
 
-    // Pass 2 — decimate smoothed points to ≤200 control points.
+    // Pass 2 — decimate smoothed points to ≤MAX_CTRL control points.
     // With smooth input, CatmullRom between widely-spaced control points won't
     // overshoot, so the tube stays within the plane bounds.
-    const MAX_CTRL = 200;
     const step = Math.max(1, Math.ceil(smoothed.length / MAX_CTRL));
     const ctrlPts = smoothed.filter((_, i) => i % step === 0 || i === smoothed.length - 1);
 
@@ -880,9 +1060,9 @@ async function exportForBlender() {
             textGeo.translate(-(bb.max.x + bb.min.x) / 2, 0, 0);
             textGeo.rotateX(-Math.PI / 2);
 
-            const px = map.latLngToContainerPoint(latlng);
-            const lx = (px.x / w - 0.5) * planeW;
-            const lz = (px.y / h - 0.5) * planeH;
+            const { px: lpx, py: lpy } = projectLatLng(latlng.lat, latlng.lng);
+            const lx = (lpx / canvasW - 0.5) * planeW;
+            const lz = (lpy / canvasH - 0.5) * planeH;
 
             const textMesh = new THREE.Mesh(textGeo, labelMat);
             // Slightly elevated above the route tube and offset northward so
@@ -977,3 +1157,6 @@ sidebarToggle.addEventListener('click', () => {
   sidebarToggle.setAttribute('aria-label', isOpen ? 'Close sidebar' : 'Open sidebar');
   sidebarToggle.querySelector('.toggle-icon').textContent = isOpen ? '\u2715' : '\u2630';
 });
+
+// ─── Restore persisted state on load ─────────────────────────────────────────
+restoreState();

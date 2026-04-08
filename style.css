@@ -68,7 +68,11 @@ html, body {
   font-family: 'Segoe UI', system-ui, sans-serif;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   user-select: none;
-  cursor: default;
+  cursor: grab;
+}
+
+.leaflet-dragging .wp-marker {
+  cursor: grabbing;
 }
 
 /* ─── Sidebar ───────────────────────────────────────────────── */
@@ -539,10 +543,10 @@ html, body {
 /* ─── Style controls (color + width) ────────────────────────── */
 #style-controls {
   border-top: 1px solid var(--border);
-  padding: 10px 16px;
+  padding: 8px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .style-row {
@@ -552,7 +556,16 @@ html, body {
 }
 
 .style-row .stat-label {
-  min-width: 44px;
+  min-width: 58px;
+}
+
+.section-caption {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-top: 4px;
 }
 
 #anim-color {
@@ -566,7 +579,8 @@ html, body {
   flex-shrink: 0;
 }
 
-#anim-weight {
+#anim-weight,
+#smooth-slider {
   flex: 1;
   -webkit-appearance: none;
   appearance: none;
@@ -577,7 +591,8 @@ html, body {
   cursor: pointer;
 }
 
-#anim-weight::-webkit-slider-thumb {
+#anim-weight::-webkit-slider-thumb,
+#smooth-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 14px;
   height: 14px;
@@ -588,7 +603,8 @@ html, body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
-#anim-weight::-moz-range-thumb {
+#anim-weight::-moz-range-thumb,
+#smooth-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
