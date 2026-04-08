@@ -92,6 +92,7 @@ function saveState() {
     routePoints,
     statDistance: document.getElementById('stat-distance').textContent,
     statDuration: document.getElementById('stat-duration').textContent,
+    travelMode,
   };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
@@ -107,7 +108,7 @@ function restoreState() {
   } catch { return; }
 
   const { waypoints: saved = [], routePoints: savedRoute = [],
-          statDistance = '', statDuration = '' } = state;
+          statDistance = '', statDuration = '', travelMode: savedMode = 'car' } = state;
   if (!saved.length) return;
 
   for (const { lat, lng, label, placeName } of saved) {
@@ -121,6 +122,9 @@ function restoreState() {
     updateMarkerTooltip(wp);
   }
   refreshSidebar();
+
+  travelMode = savedMode;
+  travelModeSelect.value = savedMode;
 
   if (savedRoute.length > 1) {
     routePoints = savedRoute;
@@ -143,6 +147,9 @@ function restoreState() {
 }
 let routeLayer = null;
 let promptLabelId = null; // id of the most recently placed waypoint (auto-prompts label edit)
+
+// Route mode
+let travelMode = 'car';   // 'car' | 'flight'
 
 // Animation state
 let routePoints   = [];   // [lat, lng] pairs from Mapbox geometry
@@ -270,6 +277,7 @@ const routeLoading      = document.getElementById('route-loading');
 const routeLoadingText  = document.getElementById('route-loading-text');
 const clearAllBtn       = document.getElementById('clear-all-btn');
 const exportBtn         = document.getElementById('export-btn');
+const travelModeSelect   = document.getElementById('travel-mode');
 const exportLabelsCheck  = document.getElementById('export-labels');
 const smoothSlider       = document.getElementById('smooth-slider');
 const smoothLabel        = document.getElementById('smooth-label');
@@ -286,6 +294,11 @@ terrainCheck.addEventListener('change', () => {
 });
 reliefSlider.addEventListener('input', () => {
   reliefLabel.textContent = RELIEF_LABELS[Number(reliefSlider.value)];
+});
+travelModeSelect.addEventListener('change', () => {
+  travelMode = travelModeSelect.value;
+  saveState();
+  if (waypoints.length >= 2) updateRoute();
 });
 
 // Paired [SMOOTH_R, MAX_CTRL] per smoothing level.
@@ -696,9 +709,54 @@ function clearRoute() {
   routeStats.classList.add('hidden');
 }
 
+function buildFlightRoute() {
+  // Straight-line legs between consecutive waypoints, interpolated to 60
+  // points each for smooth animation. Straight lines on Mercator are correct
+  // for air travel; no API key or network request needed.
+  const STEPS = 60;
+  const pts = [];
+  let totalDist = 0;
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = waypoints[i].latlng;
+    const b = waypoints[i + 1].latlng;
+    totalDist += a.distanceTo(b);
+    for (let s = (i === 0 ? 0 : 1); s <= STEPS; s++) {
+      const t = s / STEPS;
+      pts.push([a.lat + (b.lat - a.lat) * t, a.lng + (b.lng - a.lng) * t]);
+    }
+  }
+
+  routePoints = pts;
+  cumDist     = buildCumDist(routePoints);
+
+  routeLayer = L.polyline(routePoints, {
+    color: '#5b8dee', weight: 4, opacity: 0.85,
+    lineJoin: 'round', lineCap: 'round',
+  }).addTo(map);
+
+  const mi = (totalDist / 1609.344).toFixed(1);
+  const km = (totalDist / 1000).toFixed(1);
+  // Assume 800 km/h cruising speed
+  const totalSec = totalDist / 222.2;
+  const h   = Math.floor(totalSec / 3600);
+  const min = Math.floor((totalSec % 3600) / 60);
+  const durationStr = h > 0 ? `${h} hr ${min} min` : `${min} min`;
+
+  document.getElementById('stat-distance').textContent = `${mi} mi (${km} km)`;
+  document.getElementById('stat-duration').textContent = durationStr;
+  routeStats.classList.remove('hidden');
+
+  setPlayingState(false);
+  progressFill.style.width = '0%';
+  playbackPanel.classList.remove('hidden');
+  progressTrack.classList.remove('hidden');
+  saveState();
+}
+
 async function updateRoute() {
   clearRoute();
   if (waypoints.length < 2) return;
+  if (travelMode === 'flight') { buildFlightRoute(); return; }
   if (!graphhopperKey) { openKeyModal(); return; }
 
   // GraphHopper uses repeated point=lat,lng query params
@@ -1084,46 +1142,157 @@ async function exportForBlender() {
     planeMesh.name  = 'MapPlane';
 
     // ── Route tube ────────────────────────────────────────────────
-    // Project all route points using the tile-math projection for pixel-perfect
-    // alignment with the captured map texture.
-    const rawPts = routePoints.map(([lat, lng]) => {
-      const { px, py } = projectLatLng(lat, lng);
-      const u = px / canvasW;
-      const v = py / canvasH;
-      return new THREE.Vector3(
-        (u - 0.5) * planeW,
-        terrainY(u, v) + CLEARANCE,
-        (v - 0.5) * planeH,
+    let curve;
+    let tubeGeo;
+
+    if (travelMode === 'flight') {
+      // Per-leg independent curves with a fixed cruise altitude profile:
+      //   takeoff → climb → flat cruise → descent → landing.
+      // Each leg is its own CatmullRomCurve3 so waypoints are hard stops.
+      // Cruise altitude sits above the highest terrain point in the scene,
+      // guaranteeing it never clips through the map at any relief setting.
+      const maxTerrainY  = hmap ? (hmap.maxElev - hmap.minElev) * elevScale : 0;
+      const CRUISE_ALT = maxTerrainY + planeW * 0.04;
+
+      // Quintic Bézier (degree 5, 6 control points) subclass.
+      // With the last THREE control points all at CRUISE_ALT, both the first AND
+      // second derivatives in Y are exactly zero at t=1 — C2 continuity with the
+      // LineCurve3, which means zero curvature at the transition. No sharp bend.
+      //   1st deriv  ∝ P5−P4       → CRUISE_ALT−CRUISE_ALT = 0  ✓ (C1, horizontal)
+      //   2nd deriv  ∝ P5−2P4+P3   → 0−0+0               = 0  ✓ (C2, zero curvature)
+      class QuinticBezierCurve3 extends THREE.Curve {
+        constructor(p0,p1,p2,p3,p4,p5){ super(); this.pts=[p0,p1,p2,p3,p4,p5]; }
+        getPoint(t, out = new THREE.Vector3()) {
+          const [p0,p1,p2,p3,p4,p5] = this.pts;
+          const u = 1-t;
+          const b = [u**5, 5*u**4*t, 10*u**3*t**2, 10*u**2*t**3, 5*u*t**4, t**5];
+          return out.set(
+            b[0]*p0.x+b[1]*p1.x+b[2]*p2.x+b[3]*p3.x+b[4]*p4.x+b[5]*p5.x,
+            b[0]*p0.y+b[1]*p1.y+b[2]*p2.y+b[3]*p3.y+b[4]*p4.y+b[5]*p5.y,
+            b[0]*p0.z+b[1]*p1.z+b[2]*p2.z+b[3]*p3.z+b[4]*p4.z+b[5]*p5.z,
+          );
+        }
+      }
+
+      // Smooth slider: controls CLIMB_FRAC (how much of each leg is climb/descent)
+      // AND p2Y (how early the curve starts flattening into cruise altitude).
+      // Higher levels = longer S-curves + earlier flattening = gentler transition.
+      const FLIGHT_CLIMB_FRACS = [0.10, 0.18, 0.25, 0.35, 0.48];
+      const FLIGHT_P2Y_FRAC    = [0.55, 0.65, 0.75, 0.85, 0.93]; // fraction toward CRUISE_ALT
+      const CLIMB_FRAC = FLIGHT_CLIMB_FRACS[Number(smoothSlider.value)];
+      const p2YFrac    = FLIGHT_P2Y_FRAC[Number(smoothSlider.value)];
+      const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
+
+      // Build all leg CurvePaths first so we can measure their actual 3D arc
+      // lengths before allocating tube segments proportionally (keeps Build
+      // modifier in sync with Follow Curve in Blender).
+      const legPaths = [];
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const pA = projectLatLng(waypoints[i].latlng.lat,     waypoints[i].latlng.lng);
+        const pB = projectLatLng(waypoints[i + 1].latlng.lat, waypoints[i + 1].latlng.lng);
+        const ax = (pA.px / canvasW - 0.5) * planeW,  az = (pA.py / canvasH - 0.5) * planeH;
+        const bx = (pB.px / canvasW - 0.5) * planeW,  bz = (pB.py / canvasH - 0.5) * planeH;
+        const aU = pA.px / canvasW, aV = pA.py / canvasH;
+        const bU = pB.px / canvasW, bV = pB.py / canvasH;
+        const aY = terrainY(aU, aV) + CLEARANCE;
+        const bY = terrainY(bU, bV) + CLEARANCE;
+        const dx = bx - ax, dz = bz - az;
+        const cf = CLIMB_FRAC;
+
+        // Climb — 6 control points.
+        // P0: takeoff (ground).  P1,P2: shape the S-curve body.
+        // P3,P4,P5: all at CRUISE_ALT → C2 at t=1, zero curvature joining LineCurve3.
+        const climbEnd = new THREE.Vector3(ax + dx*cf, CRUISE_ALT, az + dz*cf);
+        const climb = new QuinticBezierCurve3(
+          new THREE.Vector3(ax,              aY,                              az),
+          new THREE.Vector3(ax + dx*cf*0.25, aY + (CRUISE_ALT-aY)*0.3,       az + dz*cf*0.25),
+          new THREE.Vector3(ax + dx*cf*0.55, aY + (CRUISE_ALT-aY)*p2YFrac,   az + dz*cf*0.55),
+          new THREE.Vector3(ax + dx*cf*0.75, CRUISE_ALT,                      az + dz*cf*0.75),
+          new THREE.Vector3(ax + dx*cf*0.90, CRUISE_ALT,                      az + dz*cf*0.90),
+          climbEnd,
+        );
+
+        // Descent — mirror of climb.
+        // P0,P1,P2: all at CRUISE_ALT → C2 at t=0, zero curvature departing LineCurve3.
+        const descentStart = new THREE.Vector3(ax + dx*(1-cf), CRUISE_ALT, az + dz*(1-cf));
+        const descent = new QuinticBezierCurve3(
+          descentStart,
+          new THREE.Vector3(ax + dx*(1-cf*0.90), CRUISE_ALT,                      az + dz*(1-cf*0.90)),
+          new THREE.Vector3(ax + dx*(1-cf*0.75), CRUISE_ALT,                      az + dz*(1-cf*0.75)),
+          new THREE.Vector3(ax + dx*(1-cf*0.55), bY + (CRUISE_ALT-bY)*p2YFrac,   az + dz*(1-cf*0.55)),
+          new THREE.Vector3(ax + dx*(1-cf*0.25), bY + (CRUISE_ALT-bY)*0.3,       az + dz*(1-cf*0.25)),
+          new THREE.Vector3(bx,                  bY,                              bz),
+        );
+
+        const legPath = new THREE.CurvePath();
+        legPath.add(climb);
+        if (climbEnd.distanceTo(descentStart) > planeW * 1e-3) {
+          legPath.add(new THREE.LineCurve3(climbEnd, descentStart));
+        }
+        legPath.add(descent);
+        legPaths.push(legPath);
+      }
+
+      // Measure true 3D arc length of each leg, then distribute 1200 total tube
+      // segments proportionally so segment density is uniform across all legs.
+      const legLengths  = legPaths.map((p) => p.getLength());
+      const totalLength = legLengths.reduce((a, b) => a + b, 0);
+      const TOTAL_SEGS  = 1200;
+
+      const legTubeGeos  = [];
+      const legCenterPts = [];
+      for (let i = 0; i < legPaths.length; i++) {
+        const segs = Math.max(4, Math.round(TOTAL_SEGS * legLengths[i] / totalLength));
+        legTubeGeos.push(new THREE.TubeGeometry(legPaths[i], segs, planeW * 0.004, 8, false));
+        legCenterPts.push(...legPaths[i].getPoints(Math.max(4, Math.round(150 * legLengths[i] / totalLength))));
+      }
+
+      tubeGeo = mergeGeometries(legTubeGeos);
+      // Surrogate with getPoints() so the shared center-line code below works unchanged.
+      curve   = { getPoints: () => legCenterPts };
+
+    } else {
+      // Project all route points using the tile-math projection for pixel-perfect
+      // alignment with the captured map texture.
+      const rawPts = routePoints.map(([lat, lng]) => {
+        const { px, py } = projectLatLng(lat, lng);
+        const u = px / canvasW;
+        const v = py / canvasH;
+        return new THREE.Vector3(
+          (u - 0.5) * planeW,
+          terrainY(u, v) + CLEARANCE,
+          (v - 0.5) * planeH,
+        );
+      });
+
+      // Pass 1 — moving-average smooth.
+      // When terrain is enabled, include Y in the average so elevation spikes
+      // are smoothed along with the XZ path — prevents the tube clipping into
+      // terrain between GPS points.
+      const { r: SMOOTH_R, ctrl: MAX_CTRL } = SMOOTH_PARAMS[Number(smoothSlider.value)];
+      const smoothed = rawPts.map((_, i) => {
+        const j0 = Math.max(0, i - SMOOTH_R);
+        const j1 = Math.min(rawPts.length - 1, i + SMOOTH_R);
+        let x = 0, y = 0, z = 0, n = 0;
+        for (let j = j0; j <= j1; j++) { x += rawPts[j].x; y += rawPts[j].y; z += rawPts[j].z; n++; }
+        return new THREE.Vector3(x / n, y / n, z / n);
+      });
+
+      // Pass 2 — decimate smoothed points to ≤MAX_CTRL control points.
+      // With smooth input, CatmullRom between widely-spaced control points won't
+      // overshoot, so the tube stays within the plane bounds.
+      const step    = Math.max(1, Math.ceil(smoothed.length / MAX_CTRL));
+      const ctrlPts = smoothed.filter((_, i) => i % step === 0 || i === smoothed.length - 1);
+
+      curve   = new THREE.CatmullRomCurve3(ctrlPts, false, 'centripetal');
+      tubeGeo = new THREE.TubeGeometry(
+        curve,
+        1200,          // tube segments — high resolution, independent of control count
+        planeW * 0.004,
+        8,
+        false
       );
-    });
-
-    // Pass 1 — moving-average smooth.
-    // When terrain is enabled, include Y in the average so elevation spikes
-    // are smoothed along with the XZ path — prevents the tube clipping into
-    // terrain between GPS points.
-    const { r: SMOOTH_R, ctrl: MAX_CTRL } = SMOOTH_PARAMS[Number(smoothSlider.value)];
-    const smoothed = rawPts.map((_, i) => {
-      const j0 = Math.max(0, i - SMOOTH_R);
-      const j1 = Math.min(rawPts.length - 1, i + SMOOTH_R);
-      let x = 0, y = 0, z = 0, n = 0;
-      for (let j = j0; j <= j1; j++) { x += rawPts[j].x; y += rawPts[j].y; z += rawPts[j].z; n++; }
-      return new THREE.Vector3(x / n, y / n, z / n);
-    });
-
-    // Pass 2 — decimate smoothed points to ≤MAX_CTRL control points.
-    // With smooth input, CatmullRom between widely-spaced control points won't
-    // overshoot, so the tube stays within the plane bounds.
-    const step    = Math.max(1, Math.ceil(smoothed.length / MAX_CTRL));
-    const ctrlPts = smoothed.filter((_, i) => i % step === 0 || i === smoothed.length - 1);
-
-    const curve   = new THREE.CatmullRomCurve3(ctrlPts, false, 'centripetal');
-    const tubeGeo = new THREE.TubeGeometry(
-      curve,
-      1200,          // tube segments — high resolution, independent of control count
-      planeW * 0.004,
-      8,
-      false
-    );
+    }
 
     const tubeColor = new THREE.Color(animColor);
     const tubeMat   = new THREE.MeshStandardMaterial({
