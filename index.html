@@ -123,6 +123,18 @@
                  aria-label="Route smoothing level" />
           <span id="smooth-label" class="stat-value">Light</span>
         </div>
+        <div class="style-row">
+          <label for="terrain-check" class="stat-label">Terrain</label>
+          <input type="checkbox" id="terrain-check"
+                 aria-label="Enable 3D terrain heightmap" />
+          <span class="stat-note">3D elevation</span>
+        </div>
+        <div id="terrain-relief-row" class="style-row hidden">
+          <label for="relief-slider" class="stat-label">Relief</label>
+          <input type="range" id="relief-slider" min="0" max="4" step="1" value="2"
+                 aria-label="Terrain relief multiplier" />
+          <span id="relief-label" class="stat-value">1×</span>
+        </div>
       </div>
       <button id="export-btn" aria-label="Export scene for Blender">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"

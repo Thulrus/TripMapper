@@ -270,9 +270,23 @@ const routeLoading      = document.getElementById('route-loading');
 const routeLoadingText  = document.getElementById('route-loading-text');
 const clearAllBtn       = document.getElementById('clear-all-btn');
 const exportBtn         = document.getElementById('export-btn');
-const exportLabelsCheck = document.getElementById('export-labels');
-const smoothSlider      = document.getElementById('smooth-slider');
-const smoothLabel       = document.getElementById('smooth-label');
+const exportLabelsCheck  = document.getElementById('export-labels');
+const smoothSlider       = document.getElementById('smooth-slider');
+const smoothLabel        = document.getElementById('smooth-label');
+const terrainCheck       = document.getElementById('terrain-check');
+const terrainReliefRow   = document.getElementById('terrain-relief-row');
+const reliefSlider       = document.getElementById('relief-slider');
+const reliefLabel        = document.getElementById('relief-label');
+
+const RELIEF_MULTS  = [0.25, 0.5, 1, 2, 4];
+const RELIEF_LABELS = ['0.25×', '0.5×', '1×', '2×', '4×'];
+
+terrainCheck.addEventListener('change', () => {
+  terrainReliefRow.classList.toggle('hidden', !terrainCheck.checked);
+});
+reliefSlider.addEventListener('input', () => {
+  reliefLabel.textContent = RELIEF_LABELS[Number(reliefSlider.value)];
+});
 
 // Paired [SMOOTH_R, MAX_CTRL] per smoothing level.
 // Higher SMOOTH_R widens the moving-average window; lower MAX_CTRL keeps
@@ -909,7 +923,84 @@ async function captureRouteTiles() {
     return { px: (tx - tMinX) * 256, py: (ty - tMinY) * 256 };
   };
 
-  return { canvas, projectLatLng, canvasW, canvasH };
+  return { canvas, projectLatLng, canvasW, canvasH, tMinX, tMaxX, tMinY, tMaxY, z, toTileF };
+}
+
+// Fetch AWS Terrain Tiles (Terrarium format) for the same tile bounds returned
+// by captureRouteTiles(). Decodes each pixel to metres of elevation, then
+// provides a bilinear-interpolated getElevation(u, v) sampler (u/v in 0..1
+// matching the map texture UV space).
+async function buildTerrainHeightmap(tMinX, tMaxX, tMinY, tMaxY, z, toTileF) {
+  const cols = tMaxX - tMinX + 1;
+  const rows = tMaxY - tMinY + 1;
+  const W    = cols * 256;
+  const H    = rows * 256;
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const promises = [];
+  for (let ty = tMinY; ty <= tMaxY; ty++) {
+    for (let tx = tMinX; tx <= tMaxX; tx++) {
+      const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`;
+      const dx  = (tx - tMinX) * 256;
+      const dy  = (ty - tMinY) * 256;
+      promises.push(new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin    = 'anonymous';
+        img.referrerPolicy = 'no-referrer-when-downgrade';
+        img.onload  = () => { try { ctx.drawImage(img, dx, dy, 256, 256); } catch {} resolve(); };
+        img.onerror = resolve; // silently skip failed tiles (ocean areas etc.)
+        img.src = url;
+      }));
+    }
+  }
+  await Promise.all(promises);
+
+  const imgData = ctx.getImageData(0, 0, W, H).data; // Uint8ClampedArray, RGBA
+
+  // Terrarium decode: elev (m) = R*256 + G + B/256 - 32768
+  const elevAt = (px, py) => {
+    const ix = Math.max(0, Math.min(W - 1, Math.round(px)));
+    const iy = Math.max(0, Math.min(H - 1, Math.round(py)));
+    const i  = (iy * W + ix) * 4;
+    return imgData[i] * 256 + imgData[i + 1] + imgData[i + 2] / 256 - 32768;
+  };
+
+  // Compute range over the full canvas for auto-scale normalization
+  let minElev =  Infinity;
+  let maxElev = -Infinity;
+  // Sample on a coarse grid rather than every pixel — fast enough, accurate enough
+  const STEP = 8;
+  for (let y = 0; y < H; y += STEP) {
+    for (let x = 0; x < W; x += STEP) {
+      const e = elevAt(x, y);
+      if (e < minElev) minElev = e;
+      if (e > maxElev) maxElev = e;
+    }
+  }
+  // Guard against flat/ocean scenes
+  if (maxElev - minElev < 1) { minElev = 0; maxElev = 1; }
+
+  // Bilinear-interpolated sampler in UV space (0..1 → canvas pixels)
+  const getElevation = (u, v) => {
+    const px = u * (W - 1);
+    const py = v * (H - 1);
+    const x0 = Math.floor(px), x1 = Math.min(x0 + 1, W - 1);
+    const y0 = Math.floor(py), y1 = Math.min(y0 + 1, H - 1);
+    const fx = px - x0, fy = py - y0;
+    return (
+      elevAt(x0, y0) * (1 - fx) * (1 - fy) +
+      elevAt(x1, y0) *      fx  * (1 - fy) +
+      elevAt(x0, y1) * (1 - fx) *      fy  +
+      elevAt(x1, y1) *      fx  *      fy
+    );
+  };
+
+  console.info(`[TripMapper] Elevation range: ${minElev.toFixed(0)}m – ${maxElev.toFixed(0)}m`);
+  return { getElevation, minElev, maxElev };
 }
 
 // Cached Three.js addon modules and font — lazily loaded on first label export
@@ -930,53 +1021,99 @@ async function exportForBlender() {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
 
     // Fetch tiles covering the full route at the best zoom — fully viewport-independent
-    const { canvas: mapCanvas, projectLatLng, canvasW, canvasH } = await captureRouteTiles();
+    exportBtn.textContent = 'Fetching map…';
+    const { canvas: mapCanvas, projectLatLng, canvasW, canvasH,
+            tMinX, tMaxX, tMinY, tMaxY, z: tileZ, toTileF } = await captureRouteTiles();
+
     // Scale plane so its longest side = 10 Blender units
     const aspect = canvasW / canvasH;
     const planeW = aspect >= 1 ? 10 : 10 * aspect;
     const planeH = aspect >= 1 ? 10 / aspect : 10;
 
+    // ── Terrain heightmap (optional) ───────────────────────────────
+    const usesTerrain = terrainCheck.checked;
+    let hmap = null; // { getElevation, minElev, maxElev }
+    if (usesTerrain) {
+      exportBtn.textContent = 'Fetching terrain…';
+      hmap = await buildTerrainHeightmap(tMinX, tMaxX, tMinY, tMaxY, tileZ, toTileF);
+    }
+
+    // elevScale maps metres → Blender units.
+    // Auto-normalize so the full elevation range of the scene occupies 15% of
+    // planeW at 1× relief, then apply the user's multiplier on top.
+    const elevRange = hmap ? (hmap.maxElev - hmap.minElev) : 1;
+    const baseScale = (planeW * 0.05) / elevRange;
+    const elevScale = baseScale * RELIEF_MULTS[Number(reliefSlider.value)];
+    // Small constant clearance keeps tube above the terrain surface
+    const CLEARANCE = planeW * 0.003;
+
+    // Helper: Y position for a canvas UV coordinate
+    const terrainY = (u, v) =>
+      hmap ? (hmap.getElevation(u, v) - hmap.minElev) * elevScale : 0;
+
     // ── Map plane ──────────────────────────────────────────────────
-    const texture   = new THREE.CanvasTexture(mapCanvas);
+    const texture = new THREE.CanvasTexture(mapCanvas);
     // Use the default flipY=true — GLTFExporter compensates by flipping UV V coords,
     // so the exported file has correct north-south orientation in Blender.
 
-    const planeGeo = new THREE.PlaneGeometry(planeW, planeH);
+    // With terrain: subdivide into 150×150 quads so each vertex can be
+    // displaced. Without terrain: a single quad is sufficient.
+    const SEGS = usesTerrain ? 499 : 1;
+    const planeGeo = new THREE.PlaneGeometry(planeW, planeH, SEGS, SEGS);
     // Rotate so the plane lies flat (XZ plane) in Y-up glTF space
     planeGeo.rotateX(-Math.PI / 2);
+
+    if (usesTerrain) {
+      // Displace each vertex in Y according to the decoded elevation.
+      // After rotateX, layout in the position buffer is [x, y, z] where
+      // y is the up axis. U = (x/planeW + 0.5), V = (z/planeH + 0.5).
+      const pos = planeGeo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const vx = pos.getX(i);
+        const vz = pos.getZ(i);
+        const u  = vx / planeW + 0.5;
+        const v  = vz / planeH + 0.5;
+        pos.setY(i, terrainY(u, v));
+      }
+      pos.needsUpdate = true;
+      planeGeo.computeVertexNormals();
+    }
+
     const planeMat  = new THREE.MeshStandardMaterial({ map: texture });
     const planeMesh = new THREE.Mesh(planeGeo, planeMat);
     planeMesh.name  = 'MapPlane';
 
     // ── Route tube ────────────────────────────────────────────────
-    // Project all route points using Leaflet's Mercator for pixel-perfect
+    // Project all route points using the tile-math projection for pixel-perfect
     // alignment with the captured map texture.
     const rawPts = routePoints.map(([lat, lng]) => {
       const { px, py } = projectLatLng(lat, lng);
+      const u = px / canvasW;
+      const v = py / canvasH;
       return new THREE.Vector3(
-        (px / canvasW - 0.5) * planeW,
-        0.02,
-        (py / canvasH - 0.5) * planeH,
+        (u - 0.5) * planeW,
+        terrainY(u, v) + CLEARANCE,
+        (v - 0.5) * planeH,
       );
     });
 
     // Pass 1 — moving-average smooth.
-    // Dense GPS points cause high-frequency direction changes that make
-    // CatmullRom oscillate ("lumpy mess"). Smoothing removes the jitter
-    // so the spline has no reason to overshoot after we decimate in pass 2.
+    // When terrain is enabled, include Y in the average so elevation spikes
+    // are smoothed along with the XZ path — prevents the tube clipping into
+    // terrain between GPS points.
     const { r: SMOOTH_R, ctrl: MAX_CTRL } = SMOOTH_PARAMS[Number(smoothSlider.value)];
     const smoothed = rawPts.map((_, i) => {
       const j0 = Math.max(0, i - SMOOTH_R);
       const j1 = Math.min(rawPts.length - 1, i + SMOOTH_R);
-      let x = 0, z = 0, n = 0;
-      for (let j = j0; j <= j1; j++) { x += rawPts[j].x; z += rawPts[j].z; n++; }
-      return new THREE.Vector3(x / n, 0.02, z / n);
+      let x = 0, y = 0, z = 0, n = 0;
+      for (let j = j0; j <= j1; j++) { x += rawPts[j].x; y += rawPts[j].y; z += rawPts[j].z; n++; }
+      return new THREE.Vector3(x / n, y / n, z / n);
     });
 
     // Pass 2 — decimate smoothed points to ≤MAX_CTRL control points.
     // With smooth input, CatmullRom between widely-spaced control points won't
     // overshoot, so the tube stays within the plane bounds.
-    const step = Math.max(1, Math.ceil(smoothed.length / MAX_CTRL));
+    const step    = Math.max(1, Math.ceil(smoothed.length / MAX_CTRL));
     const ctrlPts = smoothed.filter((_, i) => i % step === 0 || i === smoothed.length - 1);
 
     const curve   = new THREE.CatmullRomCurve3(ctrlPts, false, 'centripetal');
@@ -1061,13 +1198,16 @@ async function exportForBlender() {
             textGeo.rotateX(-Math.PI / 2);
 
             const { px: lpx, py: lpy } = projectLatLng(latlng.lat, latlng.lng);
-            const lx = (lpx / canvasW - 0.5) * planeW;
-            const lz = (lpy / canvasH - 0.5) * planeH;
+            const lu = lpx / canvasW;
+            const lv = lpy / canvasH;
+            const lx = (lu - 0.5) * planeW;
+            const lz = (lv - 0.5) * planeH;
+            // Elevate labels above terrain surface (or the flat plane)
+            const ly = terrainY(lu, lv) + CLEARANCE * 3 + (usesTerrain ? 0 : 0.06);
 
             const textMesh = new THREE.Mesh(textGeo, labelMat);
-            // Slightly elevated above the route tube and offset northward so
-            // the label sits just above its waypoint marker
-            textMesh.position.set(lx, 0.08, lz - planeH * 0.025);
+            // Offset northward so the label sits above its waypoint marker
+            textMesh.position.set(lx, ly, lz - planeH * 0.025);
             textMesh.name = `Label_${text}`;
             labelMeshes.push(textMesh);
           }
@@ -1160,3 +1300,5 @@ sidebarToggle.addEventListener('click', () => {
 
 // ─── Restore persisted state on load ─────────────────────────────────────────
 restoreState();
+// Sync terrain relief row to whatever the browser restored the checkbox to.
+terrainReliefRow.classList.toggle('hidden', !terrainCheck.checked);

@@ -579,40 +579,7 @@ html, body {
   flex-shrink: 0;
 }
 
-#anim-weight,
-#smooth-slider {
-  flex: 1;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-}
-
-#anim-weight::-webkit-slider-thumb,
-#smooth-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  cursor: pointer;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-
-#anim-weight::-moz-range-thumb,
-#smooth-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-  border: none;
-}
+/* slider rules consolidated under Export-related checkboxes section below */
 
 .style-row select {
   flex: 1;
@@ -645,13 +612,52 @@ html, body {
   min-width: 0;
 }
 
-/* ─── Export-labels checkbox row ─────────────────────── */
-#export-labels {
+/* ─── Export-related checkboxes ─────────────────────── */
+#export-labels,
+#terrain-check {
   accent-color: var(--accent);
   width: 14px;
   height: 14px;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+#anim-weight,
+#smooth-slider,
+#relief-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#anim-weight::-webkit-slider-thumb,
+#smooth-slider::-webkit-slider-thumb,
+#relief-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+#anim-weight::-moz-range-thumb,
+#smooth-slider::-moz-range-thumb,
+#relief-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  border: none;
 }
 
 .stat-note {
